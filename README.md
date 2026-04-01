@@ -31,3 +31,30 @@
 <img width="938" height="488" alt="image" src="https://github.com/user-attachments/assets/20f15518-b3ba-408f-b5e0-41adddbf0bc2" />
 <img width="958" height="528" alt="image" src="https://github.com/user-attachments/assets/e6486cd3-5b4f-40d7-9502-dd9d988fc361" />
 <img width="634" height="95" alt="image" src="https://github.com/user-attachments/assets/46429cbe-3108-4761-98a1-889d44186133" />
+
+
+
+
+
+Задание «КТ 4. Трассировка операций»
+
+
+
+
+
+
+
+
+<img width="942" height="479" alt="image" src="https://github.com/user-attachments/assets/47bdc24a-e7da-4dbb-b795-b0bb54939ec7" />
+<img width="953" height="452" alt="image" src="https://github.com/user-attachments/assets/c1a1a67e-e9b0-49b0-a0ea-e03065f4c5dd" />
+<img width="960" height="296" alt="image" src="https://github.com/user-attachments/assets/c6b9f91f-64cd-4d9f-90be-bb77ac24f367" />
+
+
+
+
+
+
+
+
+
+
