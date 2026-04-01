@@ -1,0 +1,31 @@
+TaskManagerApp Information: 0 : [INFO] Приложение запущено.
+[TRACE] Инициализация приложения.
+[TRACE] Введена команда: add
+[TRACE] Начало операции AddTask.
+[TRACE] Проверка введённого названия: "сделать кт"
+TaskManagerApp Information: 0 : [INFO] Задача "сделать кт" успешно добавлена.
+TaskManagerApp Information: 0 : [INFO] Количество задач: 1
+[TRACE] Конец операции AddTask. Результат: успех.
+[TRACE] Введена команда: add
+[TRACE] Начало операции AddTask.
+[TRACE] Проверка введённого названия: "погулять"
+TaskManagerApp Information: 0 : [INFO] Задача "погулять" успешно добавлена.
+TaskManagerApp Information: 0 : [INFO] Количество задач: 2
+[TRACE] Конец операции AddTask. Результат: успех.
+[TRACE] Введена команда: list
+[TRACE] Начало операции ListTasks.
+TaskManagerApp Information: 0 : [INFO] Выведено задач: 2
+[TRACE] Конец операции ListTasks. Результат: успех.
+[TRACE] Введена команда: remove
+[TRACE] Начало операции RemoveTask.
+[TRACE] Поиск задачи: "погулять"
+TaskManagerApp Information: 0 : [INFO] Задача "погулять" удалена.
+TaskManagerApp Information: 0 : [INFO] Количество задач: 1
+[TRACE] Конец операции RemoveTask. Результат: успех.
+[TRACE] Введена команда: list
+[TRACE] Начало операции ListTasks.
+TaskManagerApp Information: 0 : [INFO] Выведено задач: 1
+[TRACE] Конец операции ListTasks. Результат: успех.
+[TRACE] Введена команда: exit
+TaskManagerApp Information: 0 : [INFO] Приложение завершено.
+[TRACE] Завершение Main.
