@@ -12,6 +12,96 @@ internal sealed class ExceptionContext
     public LogEventLevel Level { get; init; } = LogEventLevel.Error;
 }
 
+internal static class AppTracing
+{
+    private static readonly TraceSource Trace = new("TaskManagerTrace", SourceLevels.All);
+    private static bool _isInitialized;
+
+    public static void Initialize()
+    {
+        if (_isInitialized)
+        {
+            return;
+        }
+
+        var logsDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+        Directory.CreateDirectory(logsDirectory);
+
+        Trace.Listeners.Clear();
+        Trace.Listeners.Add(new TextWriterTraceListener(Path.Combine(logsDirectory, "taskmanager-trace.log")));
+        Trace.Switch = new SourceSwitch("TaskManagerSwitch", "All");
+        System.Diagnostics.Trace.AutoFlush = true;
+
+        _isInitialized = true;
+        Trace.TraceEvent(TraceEventType.Start, 1000, "Трассировка инициализирована");
+        Trace.Flush();
+    }
+
+    public static IDisposable BeginOperation(string operationName)
+    {
+        if (!_isInitialized)
+        {
+            Initialize();
+        }
+
+        return new TraceScope(operationName);
+    }
+
+    public static void TraceInformation(string message) => Trace.TraceInformation(message);
+
+    public static void TraceError(Exception ex, string operationName)
+    {
+        Trace.TraceEvent(TraceEventType.Error, 5000, "Ошибка в {0}: {1}", operationName, ex.Message);
+        Trace.Flush();
+    }
+
+    public static void EndSession()
+    {
+        if (!_isInitialized)
+        {
+            return;
+        }
+
+        Trace.TraceEvent(TraceEventType.Stop, 1999, "Сеанс трассировки завершен");
+        Trace.Flush();
+        Trace.Close();
+        _isInitialized = false;
+    }
+
+    private sealed class TraceScope : IDisposable
+    {
+        private readonly string _operationName;
+        private readonly Stopwatch _stopwatch;
+        private bool _disposed;
+
+        public TraceScope(string operationName)
+        {
+            _operationName = operationName;
+            _stopwatch = Stopwatch.StartNew();
+            Trace.TraceEvent(TraceEventType.Start, 2000, "Начало операции {0}", _operationName);
+            Trace.Flush();
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _stopwatch.Stop();
+            Trace.TraceEvent(
+                TraceEventType.Stop,
+                2001,
+                "Завершение операции {0}. Время выполнения: {1} ms",
+                _operationName,
+                _stopwatch.ElapsedMilliseconds);
+            Trace.Flush();
+            _disposed = true;
+        }
+    }
+}
+
 internal static class ExceptionHandler
 {
     public static bool ShouldUseExternalAlerts { get; set; }
@@ -93,9 +183,20 @@ internal sealed class TaskItem
 
     public string Title { get; set; } = string.Empty;
 
+    public string Description { get; set; } = string.Empty;
+
+    public TaskPriority Priority { get; set; } = TaskPriority.Medium;
+
     public bool IsCompleted { get; set; }
 
     public override string ToString() => Title;
+}
+
+internal enum TaskPriority
+{
+    Low,
+    Medium,
+    High
 }
 
 internal sealed class TaskStorageService
@@ -174,8 +275,9 @@ internal sealed class TaskManager
 
     public IReadOnlyList<TaskItem> Tasks => _tasks;
 
-    public bool AddTask(string title, out string errorMessage)
+    public bool AddTask(string title, string? description, TaskPriority priority, out string errorMessage)
     {
+        using var traceOperation = AppTracing.BeginOperation("AddTask");
         var stopwatch = Stopwatch.StartNew();
         Log.Debug("Начало операции AddTask");
 
@@ -190,10 +292,16 @@ internal sealed class TaskManager
                 return false;
             }
 
-            _tasks.Add(new TaskItem { Title = title.Trim() });
+            _tasks.Add(new TaskItem
+            {
+                Title = title.Trim(),
+                Description = (description ?? string.Empty).Trim(),
+                Priority = priority
+            });
             stopwatch.Stop();
             errorMessage = string.Empty;
-            Log.Information("Задача \"{Title}\" успешно добавлена.", title);
+            Log.Information("Добавлена задача {TaskTitle}", title.Trim());
+            Log.Information("Добавлена задача {@Task}", _tasks[^1]);
             Log.Information("Количество задач: {Count}", _tasks.Count);
             Log.Debug("Конец AddTask. Результат: успех. Время: {Time} ms", stopwatch.ElapsedMilliseconds);
             return true;
@@ -202,6 +310,7 @@ internal sealed class TaskManager
         {
             stopwatch.Stop();
             errorMessage = "Не удалось добавить задачу из-за внутренней ошибки.";
+            AppTracing.TraceError(ex, "AddTask");
             ExceptionHandler.Handle(ex, "AddTask", LogEventLevel.Error);
             Log.Debug("Конец AddTask. Результат: исключение. Время: {Time} ms", stopwatch.ElapsedMilliseconds);
             return false;
@@ -210,6 +319,7 @@ internal sealed class TaskManager
 
     public bool RemoveTask(Guid taskId, out string errorMessage)
     {
+        using var traceOperation = AppTracing.BeginOperation("RemoveTask");
         var stopwatch = Stopwatch.StartNew();
         Log.Debug("Начало операции RemoveTask");
 
@@ -237,6 +347,7 @@ internal sealed class TaskManager
         {
             stopwatch.Stop();
             errorMessage = "Не удалось удалить задачу из-за внутренней ошибки.";
+            AppTracing.TraceError(ex, "RemoveTask");
             ExceptionHandler.Handle(ex, "RemoveTask", LogEventLevel.Error);
             Log.Debug("Конец RemoveTask. Результат: исключение. Время: {Time} ms", stopwatch.ElapsedMilliseconds);
             return false;
@@ -291,8 +402,10 @@ internal sealed class MainForm : Form
 {
     private readonly TaskManager _taskManager;
     private readonly TextBox _taskInput = new() { PlaceholderText = "Введите название задачи..." };
+    private readonly TextBox _taskDescriptionInput = new() { PlaceholderText = "Описание (необязательно)..." };
     private readonly CheckedListBox _tasksList = new() { CheckOnClick = true };
     private readonly ComboBox _filterBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _priorityBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label _statusLabel = new() { AutoSize = true, ForeColor = Color.DimGray };
     private readonly List<TaskItem> _visibleTasks = [];
     private bool _isRefreshingList;
@@ -337,9 +450,11 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Top,
             AutoSize = true,
-            ColumnCount = 5
+            ColumnCount = 7
         };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -355,17 +470,26 @@ internal sealed class MainForm : Form
                 AddTask();
             }
         };
+        _taskDescriptionInput.Dock = DockStyle.Fill;
+        _taskDescriptionInput.Margin = new Padding(0, 0, 8, 8);
 
         var addButton = CreateButton("Добавить", (_, _) => AddTask());
         var removeButton = CreateButton("Удалить выбранную", (_, _) => RemoveSelectedTask());
-        var clearButton = CreateButton("Очистить поле", (_, _) => _taskInput.Clear());
+        var clearButton = CreateButton("Очистить поля", (_, _) =>
+        {
+            _taskInput.Clear();
+            _taskDescriptionInput.Clear();
+        });
         ConfigureFilterBox();
+        ConfigurePriorityBox();
 
         panel.Controls.Add(_taskInput, 0, 0);
-        panel.Controls.Add(addButton, 1, 0);
-        panel.Controls.Add(removeButton, 2, 0);
-        panel.Controls.Add(clearButton, 3, 0);
-        panel.Controls.Add(_filterBox, 4, 0);
+        panel.Controls.Add(_taskDescriptionInput, 1, 0);
+        panel.Controls.Add(_priorityBox, 2, 0);
+        panel.Controls.Add(addButton, 3, 0);
+        panel.Controls.Add(removeButton, 4, 0);
+        panel.Controls.Add(clearButton, 5, 0);
+        panel.Controls.Add(_filterBox, 6, 0);
 
         return panel;
     }
@@ -388,7 +512,10 @@ internal sealed class MainForm : Form
         try
         {
             var title = _taskInput.Text;
-            if (!_taskManager.AddTask(title, out var errorMessage))
+            var description = _taskDescriptionInput.Text;
+            var priority = _priorityBox.SelectedItem as TaskPriority? ?? TaskPriority.Medium;
+
+            if (!_taskManager.AddTask(title, description, priority, out var errorMessage))
             {
                 MessageBox.Show(this, errorMessage, "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 UpdateStatus(errorMessage);
@@ -403,6 +530,8 @@ internal sealed class MainForm : Form
             }
 
             _taskInput.Clear();
+            _taskDescriptionInput.Clear();
+            _priorityBox.SelectedItem = TaskPriority.Medium;
             UpdateTasksList();
             UpdateStatus($"Добавлена задача: {title.Trim()}");
             SaveTasksSilently();
@@ -447,6 +576,7 @@ internal sealed class MainForm : Form
 
     private void UpdateTasksList()
     {
+        using var traceOperation = AppTracing.BeginOperation("ShowTasks");
         try
         {
             _isRefreshingList = true;
@@ -457,11 +587,15 @@ internal sealed class MainForm : Form
             foreach (var task in GetFilteredTasks())
             {
                 _visibleTasks.Add(task);
-                _tasksList.Items.Add(task.Title, task.IsCompleted);
+                _tasksList.Items.Add(FormatTaskDisplay(task), task.IsCompleted);
             }
+
+            Log.Information("Показан список из {Count} задач", _visibleTasks.Count);
+            AppTracing.TraceInformation($"Показан список задач, count={_visibleTasks.Count}");
         }
         catch (Exception ex)
         {
+            AppTracing.TraceError(ex, "ShowTasks");
             ExceptionHandler.Handle(ex, "UI.UpdateTasksList", LogEventLevel.Error);
             MessageBox.Show(this, "Внутренняя ошибка при обновлении списка задач.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
@@ -503,6 +637,33 @@ internal sealed class MainForm : Form
             };
         };
         _filterBox.SelectedIndexChanged += (_, _) => UpdateTasksList();
+    }
+
+    private void ConfigurePriorityBox()
+    {
+        _priorityBox.Items.Add(TaskPriority.Low);
+        _priorityBox.Items.Add(TaskPriority.Medium);
+        _priorityBox.Items.Add(TaskPriority.High);
+        _priorityBox.FormattingEnabled = true;
+        _priorityBox.SelectedItem = TaskPriority.Medium;
+        _priorityBox.Width = 130;
+        _priorityBox.Margin = new Padding(0, 0, 8, 8);
+        _priorityBox.Format += (_, args) =>
+        {
+            args.Value = args.Value switch
+            {
+                TaskPriority.Low => "Приоритет: Низкий",
+                TaskPriority.Medium => "Приоритет: Средний",
+                TaskPriority.High => "Приоритет: Высокий",
+                _ => args.Value
+            };
+        };
+    }
+
+    private static string FormatTaskDisplay(TaskItem task)
+    {
+        var descriptionPart = string.IsNullOrWhiteSpace(task.Description) ? string.Empty : $" | {task.Description}";
+        return $"[{task.Priority}] {task.Title}{descriptionPart}";
     }
 
     private void TasksListOnItemCheck(object? sender, ItemCheckEventArgs e)
@@ -573,6 +734,7 @@ internal static class Program
     private static void Main()
     {
         ConfigureLogging();
+        AppTracing.Initialize();
         RegisterGlobalExceptionHandlers();
         ExceptionHandler.ShouldUseExternalAlerts = true;
 
@@ -584,10 +746,11 @@ internal static class Program
             var storagePath = Path.Combine(AppContext.BaseDirectory, "data", "tasks.json");
             var taskManager = new TaskManager(new TaskStorageService(storagePath));
             Application.Run(new MainForm(taskManager));
-            Log.Information("Приложение завершено.");
+            Log.Information("Программа завершается");
         }
         catch (Exception ex)
         {
+            AppTracing.TraceError(ex, "Program.Main");
             ExceptionHandler.Handle(ex, "Program.Main", LogEventLevel.Fatal);
             MessageBox.Show(
                 $"Произошла критическая ошибка:\n{ex.Message}",
@@ -597,6 +760,7 @@ internal static class Program
         }
         finally
         {
+            AppTracing.EndSession();
             Log.CloseAndFlush();
         }
     }
